@@ -497,7 +497,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 436cb1a45dc4b7447a9ec7360a92b3f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  killY: -10
+  killY: -200
   loseScreenCanvas: {fileID: 990538122}
 --- !u!114 &503811692
 MonoBehaviour:

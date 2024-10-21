@@ -2872,7 +2872,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 436cb1a45dc4b7447a9ec7360a92b3f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  killY: -10
+  killY: -200
   loseScreenCanvas: {fileID: 449627023}
 --- !u!1 &1799140415
 GameObject:
