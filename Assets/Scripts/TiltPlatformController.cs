@@ -1,8 +1,41 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace Assets.Scripts
 {
+    public class InputManager : MonoBehaviour
+    {
+        public enum InputType
+        {
+            Joystick,
+            Touch,
+            Gyro
+        }
+
+        public static InputType currentInputType;
+        public GameObject joystickGameObject;
+
+        public static void CheckInputType()
+        {
+            if (Input.touchSupported && Input.touchCount > 0)
+                currentInputType = InputType.Touch;
+            else if (SystemInfo.supportsGyroscope && Input.gyro.enabled)
+                currentInputType = InputType.Gyro;
+            else if (Input.GetAxis("Horizontal") != 0 || Input.GetAxis("Vertical") != 0)
+                currentInputType = InputType.Joystick;
+        }
+
+        private void Update()
+        {
+            CheckInputType();
+            UpdateJoystickVisibility();
+        }
+
+        private void UpdateJoystickVisibility()
+        {
+            if (joystickGameObject != null) joystickGameObject.SetActive(currentInputType == InputType.Joystick);
+        }
+    }
+
     public class TiltPlatformController : MonoBehaviour
     {
         private float ClampAngle(float angle)
@@ -12,17 +45,17 @@ namespace Assets.Scripts
             return Mathf.Clamp(angle, -89f, 89f);
         }
 
-        public GameObject levelPlatform;  // Reference to the level platform you want to tilt.
-        public Joystick joystick;         // On-screen analog stick.
-        public float tiltSpeed = 2f;      // Speed of tilting the object.
+        public GameObject platformGroup; // Reference to the parent of all platforms.
+        public Joystick joystick; // On-screen analog stick.
+        public float tiltSpeed = 2f; // Speed of tilting the platform group.
+        public Transform followCamera; // Reference to the follow camera transform.
+        public float cameraDistance = 5f; // Distance behind the ball.
+        public float cameraHeight = 2f; // Height of the camera relative to the ball.
 
         private bool useGyroscope;
         private Gyroscope gyro;
 
-        private Vector3 previousTouchPosition;
-        private bool isTouching;
-
-        void Start()
+        private void Start()
         {
             // Check if the device supports the gyroscope.
             if (SystemInfo.supportsGyroscope)
@@ -37,88 +70,81 @@ namespace Assets.Scripts
             }
         }
 
-        void Update()
+        private void Update()
         {
-            // Gyroscope input (available on mobile devices)
-            if (useGyroscope)
-            {
-                TiltWithGyroscope();
-            }
+            // Gyroscope input
+            if (useGyroscope && InputManager.currentInputType == InputManager.InputType.Gyro) TiltWithGyroscope();
 
             // On-screen analog stick input
-            TiltWithJoystick();
-
-            // Relative touch input
-            TiltWithTouch();
+            if (InputManager.currentInputType == InputManager.InputType.Joystick) TiltWithCameraDirection();
         }
 
-        void TiltWithGyroscope()
+        private void TiltWithGyroscope()
         {
-            Quaternion deviceRotation = gyro.attitude;
-            Quaternion rotationFix = new Quaternion(0, 0, 1, 0); // Fix the rotation from the gyro to match the game coordinates
-            levelPlatform.transform.rotation = deviceRotation * rotationFix;
+            var deviceRotation = gyro.attitude;
+            var rotationFix =
+                new Quaternion(0, 0, 1, 0); // Fix the rotation from the gyro to match the game coordinates.
+            platformGroup.transform.rotation = deviceRotation * rotationFix;
         }
 
-        void TiltWithJoystick()
+        private void TiltWithCameraDirection()
         {
-            // Map the joystick input to tilt the platform within a semi-circle dome.
-            // If the joystick is not being used, reset the platform to its original tilt.
+            // If there is no joystick input, reset the platform group to its original tilt.
+            Vector3 newEulerAngles;
             if (joystick.Horizontal == 0 && joystick.Vertical == 0)
             {
-                levelPlatform.transform.rotation = Quaternion.Slerp(levelPlatform.transform.rotation, Quaternion.identity, tiltSpeed * 0.5f * Time.deltaTime);
+                // Smoothly return the platform group back to a flat position.
+                var targetEulerAngles = new Vector3(0, platformGroup.transform.eulerAngles.y, 0);
+                newEulerAngles = new Vector3(
+                    Mathf.LerpAngle(platformGroup.transform.eulerAngles.x, targetEulerAngles.x,
+                        tiltSpeed * Time.deltaTime),
+                    platformGroup.transform.eulerAngles.y,
+                    Mathf.LerpAngle(platformGroup.transform.eulerAngles.z, targetEulerAngles.z,
+                        tiltSpeed * Time.deltaTime)
+                );
+                platformGroup.transform.eulerAngles = newEulerAngles;
                 return;
             }
-            // Map the joystick's input to create a semi-circle dome effect.
-            float horizontalInput = joystick.Horizontal;
-            float verticalInput = joystick.Vertical;
 
-            float maxAngle = 89f;
-            float targetX = verticalInput * maxAngle;
-            float targetZ = -horizontalInput * maxAngle;
+            // Get the joystick input.
+            var horizontalInput = joystick.Horizontal;
+            var verticalInput = joystick.Vertical;
 
-            // Smoothly interpolate towards the target angles to create a semi-circle dome effect.
-            Vector3 newEulerAngles = new Vector3(
-                Mathf.LerpAngle(levelPlatform.transform.eulerAngles.x, targetX, tiltSpeed * Time.deltaTime),
-                levelPlatform.transform.eulerAngles.y,
-                Mathf.LerpAngle(levelPlatform.transform.eulerAngles.z, targetZ, tiltSpeed * Time.deltaTime)
+            // Get the forward and right directions relative to the camera.
+            var cameraForward = followCamera.forward;
+            var cameraRight = followCamera.right;
+
+            // Ignore vertical direction (y-axis).
+            cameraForward.y = 0;
+            cameraRight.y = 0;
+
+            // Normalize the direction vectors.
+            cameraForward.Normalize();
+            cameraRight.Normalize();
+
+            // Calculate the tilt direction relative to the camera.
+            var tiltDirection = (cameraForward * verticalInput + cameraRight * horizontalInput).normalized;
+
+            // Calculate target rotation based on tilt direction.
+            var maxAngle = 89f;
+            var targetX = tiltDirection.z * maxAngle;
+            var targetZ = -tiltDirection.x * maxAngle;
+
+            // Smoothly interpolate towards the target angles
+            newEulerAngles = new Vector3(
+                Mathf.LerpAngle(platformGroup.transform.eulerAngles.x, targetX, tiltSpeed * Time.deltaTime),
+                platformGroup.transform.eulerAngles.y,
+                Mathf.LerpAngle(platformGroup.transform.eulerAngles.z, targetZ, tiltSpeed * Time.deltaTime)
             );
             newEulerAngles.x = ClampAngle(newEulerAngles.x);
             newEulerAngles.z = ClampAngle(newEulerAngles.z);
-            levelPlatform.transform.eulerAngles = newEulerAngles;
+            platformGroup.transform.eulerAngles = newEulerAngles;
 
-            // Ensure the platform does not tilt beyond the bounds of a semi-circle dome.
-
-            // Ensure the platform remains within a semi-circle dome range of tilt.
-            Vector3 currentEulerAngles = levelPlatform.transform.eulerAngles;
+            // Ensure the platform remains within a semi-circle dome range of tilt
+            var currentEulerAngles = platformGroup.transform.eulerAngles;
             currentEulerAngles.x = ClampAngle(currentEulerAngles.x);
             currentEulerAngles.z = ClampAngle(currentEulerAngles.z);
-            levelPlatform.transform.eulerAngles = currentEulerAngles;
-        }
-
-        void TiltWithTouch()
-        {
-            if (Input.touchCount > 0)
-            {
-                Touch touch = Input.GetTouch(0);
-
-                if (touch.phase == TouchPhase.Began)
-                {
-                    isTouching = true;
-                    previousTouchPosition = touch.position;
-                }
-                else if (touch.phase == TouchPhase.Moved && isTouching)
-                {
-                    Vector3 deltaTouch = new Vector3(touch.position.x - previousTouchPosition.x, touch.position.y - previousTouchPosition.y, 0);
-                    Vector3 tiltDirection = new Vector3(deltaTouch.y, 0, -deltaTouch.x);
-
-                    levelPlatform.transform.Rotate(tiltDirection * tiltSpeed * Time.deltaTime, Space.World);
-                    previousTouchPosition = touch.position;
-                }
-                else if (touch.phase == TouchPhase.Ended)
-                {
-                    isTouching = false;
-                }
-            }
+            platformGroup.transform.eulerAngles = currentEulerAngles;
         }
     }
 }

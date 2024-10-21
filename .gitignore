@@ -57,3 +57,6 @@ crashlytics-build.properties
 .DS_Store*
 Thumbs.db
 Desktop.ini
+Library
+Logs
+UserSettings
